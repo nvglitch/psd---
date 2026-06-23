@@ -1,0 +1,9 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Large Photoshop source files used for local testing
+*.psd
+*.psb
+*.psd.import
+*.psb.import
