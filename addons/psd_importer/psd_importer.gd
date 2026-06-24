@@ -74,6 +74,11 @@ func _get_import_options(path: String, preset_index: int) -> Array[Dictionary]:
 			"default_value": true,
 			"property_hint": PROPERTY_HINT_NONE,
 		},
+		{
+			"name": "apply_basic_blend_modes",
+			"default_value": false,
+			"property_hint": PROPERTY_HINT_NONE,
+		},
 	]
 
 
@@ -110,9 +115,17 @@ func _import(
 		parser.layers.size(), parser.psd_width, parser.psd_height
 	])
 
-	# ── 2. Build scene (textures embedded as ImageTexture) ──
+	# ── 2. Write layer images as PNG files ──
+	var texture_dir := _generated_texture_dir(source_file)
+	var tex_err := _write_layer_textures(parser.layers, texture_dir, gen_files)
+	if tex_err != OK:
+		printerr("[PSD Importer] Texture export failed: ", tex_err)
+		return tex_err
+
+	# ── 3. Build scene (textures reference generated PNG files) ──
 	var builder := PSDSceneBuilder.new()
 	builder.root_type = options.get("root_type", PSDSceneBuilder.RootType.CONTROL) as int
+	builder.apply_basic_blend_modes = bool(options.get("apply_basic_blend_modes", false))
 
 	var root := builder.build(parser)
 
@@ -149,3 +162,110 @@ func _count_nodes(node: Node) -> int:
 	for child in node.get_children():
 		count += _count_nodes(child)
 	return count
+
+
+func _generated_texture_dir(source_file: String) -> String:
+	var base_name := source_file.get_file().get_basename()
+	return "res://psd_generated/%s_layers" % _ascii_slug(base_name)
+
+
+func _write_layer_textures(layers: Array, texture_dir: String, gen_files: Array[String]) -> Error:
+	var abs_dir := ProjectSettings.globalize_path(texture_dir)
+	_clear_generated_dir(abs_dir)
+	var make_err := DirAccess.make_dir_recursive_absolute(abs_dir)
+	if make_err != OK:
+		return make_err
+
+	var used_names := {}
+	var counter := [0]
+	var err := _write_layer_textures_recursive(layers, texture_dir, used_names, counter, gen_files)
+	if err != OK:
+		return err
+	return OK
+
+
+func _write_layer_textures_recursive(layers: Array, texture_dir: String, used_names: Dictionary, counter: Array, gen_files: Array[String]) -> Error:
+	for layer in layers:
+		if layer == null:
+			continue
+		if layer.children.size() > 0:
+			var child_err := _write_layer_textures_recursive(layer.children, texture_dir, used_names, counter, gen_files)
+			if child_err != OK:
+				return child_err
+
+		if layer.image == null:
+			continue
+
+		counter[0] = int(counter[0]) + 1
+		var file_name := _unique_texture_name(layer.name, int(counter[0]), used_names)
+		var res_path := "%s/%s.png" % [texture_dir, file_name]
+		var save_err: Error = layer.image.save_png(res_path)
+		if save_err != OK:
+			return save_err
+		layer.texture_path = res_path
+		gen_files.append(res_path)
+
+	return OK
+
+
+func _clear_generated_dir(abs_dir: String) -> void:
+	if not DirAccess.dir_exists_absolute(abs_dir):
+		return
+	var dir := DirAccess.open(abs_dir)
+	if dir == null:
+		return
+
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while not entry.is_empty():
+		var path := abs_dir.path_join(entry)
+		if dir.current_is_dir():
+			_clear_generated_dir(path)
+			DirAccess.remove_absolute(path)
+		else:
+			DirAccess.remove_absolute(path)
+		entry = dir.get_next()
+	dir.list_dir_end()
+
+
+func _unique_texture_name(layer_name: String, index: int, used_names: Dictionary) -> String:
+	var base := "%04d_%s" % [index, _ascii_slug(layer_name)]
+	if base.length() > 80:
+		base = base.substr(0, 80)
+	var name := base
+	var suffix := 2
+	while used_names.has(name):
+		name = "%s_%d" % [base, suffix]
+		suffix += 1
+	used_names[name] = true
+	return name
+
+
+func _sanitize_path_part(raw: String) -> String:
+	var s := raw.replace("/", "_").replace("\\", "_").replace(":", "_")
+	s = s.replace("*", "_").replace("?", "_").replace('"', "'")
+	s = s.replace("<", "_").replace(">", "_").replace("|", "_")
+	s = s.strip_edges()
+	return s if not s.is_empty() else "Layer"
+
+
+func _ascii_slug(raw: String) -> String:
+	var s := ""
+	for i in raw.length():
+		var c := raw.unicode_at(i)
+		if c >= 48 and c <= 57:
+			s += char(c)
+		elif c >= 65 and c <= 90:
+			s += char(c)
+		elif c >= 97 and c <= 122:
+			s += char(c)
+		else:
+			s += "_"
+	while s.find("__") >= 0:
+		s = s.replace("__", "_")
+	s = s.strip_edges()
+	while s.begins_with("_"):
+		s = s.substr(1)
+	while s.ends_with("_"):
+		s = s.substr(0, s.length() - 1)
+	return s if not s.is_empty() else "layer"

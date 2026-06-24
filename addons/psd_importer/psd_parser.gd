@@ -31,6 +31,7 @@ class LayerData:
 	var has_text: bool = false      # true if TySh text engine data was found
 	var children: Array = []        # Array[LayerData]
 	var image: Image                # RGBA8 image (null for groups / adjustment layers)
+	var texture_path: String = ""   # External PNG path written by the importer
 	var text_data: Dictionary       # {text: "", font: "", size: float, color: Color}
 	var info_keys: Array[String] = []  # debug: additional info keys found
 

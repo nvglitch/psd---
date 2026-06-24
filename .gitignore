@@ -7,3 +7,6 @@
 *.psb
 *.psd.import
 *.psb.import
+
+# Generated layer textures exported from PSD imports
+psd_generated/
