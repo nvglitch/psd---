@@ -33,6 +33,7 @@ class LayerData:
 	var image: Image                # RGBA8 image (null for groups / adjustment layers)
 	var texture_path: String = ""   # External PNG path written by the importer
 	var text_data: Dictionary       # {text: "", font: "", size: float, color: Color}
+	var mask_info: Dictionary = {}  # debug: layer mask metadata, if present
 	var info_keys: Array[String] = []  # debug: additional info keys found
 
 	func width() -> int:  return right - left
@@ -154,6 +155,7 @@ func _read_layer_record(f: FileAccess) -> Dictionary:
 		"channel_ids": [],
 		"text_data": {},
 		"effects": {},
+		"mask_info": {},
 	}
 
 	rec["top"]    = _s32(f.get_32())
@@ -188,7 +190,7 @@ func _read_layer_record(f: FileAccess) -> Dictionary:
 
 	# Layer mask data
 	var mask_len := _read_u32(f)
-	f.seek(f.get_position() + mask_len)
+	rec["mask_info"] = _read_layer_mask_info(f, mask_len)
 
 	# Blending ranges
 	var br_len := _read_u32(f)
@@ -850,6 +852,39 @@ func _scan_text_block_for_style(f: FileAccess, start: int, length: int, out: Dic
 	_apply_text_transform_scale(out)
 
 
+func _read_layer_mask_info(f: FileAccess, mask_len: int) -> Dictionary:
+	var info := {
+		"length": mask_len,
+	}
+	var start := f.get_position()
+	var end := start + mask_len
+	if mask_len <= 0:
+		return info
+	if mask_len < 20:
+		f.seek(end)
+		return info
+
+	var top := _s32(f.get_32())
+	var left := _s32(f.get_32())
+	var bottom := _s32(f.get_32())
+	var right := _s32(f.get_32())
+	info["top"] = top
+	info["left"] = left
+	info["bottom"] = bottom
+	info["right"] = right
+	info["width"] = right - left
+	info["height"] = bottom - top
+	info["default_color"] = f.get_8()
+	var flags := f.get_8()
+	info["flags"] = flags
+	info["position_relative"] = (flags & 0x01) != 0
+	info["disabled"] = (flags & 0x02) != 0
+	info["invert_on_blend"] = (flags & 0x04) != 0
+
+	f.seek(end)
+	return info
+
+
 func _bytes_to_search_text(bytes: PackedByteArray) -> String:
 	var ascii := ""
 	var utf16be := ""
@@ -996,6 +1031,7 @@ func _rec_to_layerdata(rec: Dictionary) -> LayerData:
 	ld.is_clipping_mask = rec.get("is_clipping_mask", false)
 	ld.image      = rec.get("image", null)
 	ld.text_data  = rec.get("text_data", {})
+	ld.mask_info  = rec.get("mask_info", {})
 	ld.info_keys  = rec.get("info_keys", [])
 
 	# Solid color fill
