@@ -299,11 +299,12 @@ func _apply_layer_style_material(node: Node, layer) -> void:
 		var effect: Dictionary = effects["drop_shadow"]
 		var angle := deg_to_rad(float(effect.get("angle", 135.0)))
 		var distance := float(effect.get("distance", 4.0))
+		var offset := Vector2(-cos(angle), sin(angle)) * distance
 		mat.set_shader_parameter("use_drop_shadow", true)
 		mat.set_shader_parameter("drop_shadow_color", effect.get("color", Color.BLACK))
 		mat.set_shader_parameter("drop_shadow_opacity", float(effect.get("opacity", 0.75)))
 		mat.set_shader_parameter("drop_shadow_size", max(0.0, float(effect.get("size", 8.0))))
-		mat.set_shader_parameter("drop_shadow_offset", Vector2(cos(angle), -sin(angle)) * distance)
+		mat.set_shader_parameter("drop_shadow_offset", offset)
 
 	node.material = mat
 

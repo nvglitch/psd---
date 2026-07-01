@@ -65,40 +65,46 @@ float alpha_blur(sampler2D tex, vec2 uv, vec2 texel, float radius) {
 	return clamp(a, 0.0, 1.0);
 }
 
+vec4 alpha_over(vec4 src, vec4 dst) {
+	float out_a = src.a + dst.a * (1.0 - src.a);
+	if (out_a <= 0.00001) {
+		return vec4(0.0);
+	}
+	vec3 out_rgb = (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / out_a;
+	return vec4(out_rgb, out_a);
+}
+
 void fragment() {
 	vec4 base = texture(TEXTURE, UV);
 	vec2 texel = TEXTURE_PIXEL_SIZE;
-	vec4 out_color = base;
 
 	if (use_color_overlay) {
-		vec3 overlay_rgb = mix(base.rgb, color_overlay_color.rgb, color_overlay_opacity);
-		out_color.rgb = mix(out_color.rgb, overlay_rgb, base.a);
+		base.rgb = mix(base.rgb, color_overlay_color.rgb, color_overlay_opacity);
 	}
 
-	if (use_stroke && stroke_size > 0.0) {
-		float expanded = alpha_max_ring(TEXTURE, UV, texel, stroke_size);
-		float stroke_alpha = clamp(expanded - base.a, 0.0, 1.0) * stroke_opacity;
-		vec4 stroke = vec4(stroke_color.rgb, stroke_alpha * stroke_color.a);
-		out_color = mix(stroke, out_color, out_color.a);
-		out_color.a = max(out_color.a, stroke.a);
-	}
-
-	if (use_outer_glow && outer_glow_size > 0.0) {
-		float glow_alpha = alpha_blur(TEXTURE, UV, texel, outer_glow_size);
-		glow_alpha = clamp(glow_alpha - base.a, 0.0, 1.0) * outer_glow_opacity;
-		vec4 glow = vec4(outer_glow_color.rgb, glow_alpha * outer_glow_color.a);
-		out_color.rgb += glow.rgb * glow.a * (1.0 - out_color.a);
-		out_color.a = max(out_color.a, glow.a);
-	}
+	vec4 style_backdrop = vec4(0.0);
 
 	if (use_drop_shadow && drop_shadow_size >= 0.0) {
 		vec2 shadow_uv = UV - drop_shadow_offset * texel;
 		float shadow_alpha = alpha_blur(TEXTURE, shadow_uv, texel, drop_shadow_size);
 		shadow_alpha = clamp(shadow_alpha - base.a, 0.0, 1.0) * drop_shadow_opacity;
 		vec4 shadow = vec4(drop_shadow_color.rgb, shadow_alpha * drop_shadow_color.a);
-		out_color = mix(shadow, out_color, out_color.a);
-		out_color.a = max(out_color.a, shadow.a);
+		style_backdrop = alpha_over(shadow, style_backdrop);
 	}
 
-	COLOR = out_color;
+	if (use_outer_glow && outer_glow_size > 0.0) {
+		float glow_alpha = alpha_blur(TEXTURE, UV, texel, outer_glow_size);
+		glow_alpha = clamp(glow_alpha - base.a, 0.0, 1.0) * outer_glow_opacity;
+		vec4 glow = vec4(outer_glow_color.rgb, glow_alpha * outer_glow_color.a);
+		style_backdrop = alpha_over(glow, style_backdrop);
+	}
+
+	if (use_stroke && stroke_size > 0.0) {
+		float expanded = alpha_max_ring(TEXTURE, UV, texel, stroke_size);
+		float stroke_alpha = clamp(expanded - base.a, 0.0, 1.0) * stroke_opacity;
+		vec4 stroke = vec4(stroke_color.rgb, stroke_alpha * stroke_color.a);
+		style_backdrop = alpha_over(stroke, style_backdrop);
+	}
+
+	COLOR = alpha_over(base, style_backdrop);
 }

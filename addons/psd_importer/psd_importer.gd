@@ -218,19 +218,19 @@ func _expand_layer_for_effects(layer) -> void:
 		return
 
 	var old_img: Image = layer.image
-	var new_w := old_img.get_width() + int(pad.x) + int(pad.z)
-	var new_h := old_img.get_height() + int(pad.y) + int(pad.w)
+	var new_w := old_img.get_width() + pad.x + pad.z
+	var new_h := old_img.get_height() + pad.y + pad.w
 	if new_w <= old_img.get_width() or new_h <= old_img.get_height():
 		return
 
 	var new_img := Image.create(new_w, new_h, false, Image.FORMAT_RGBA8)
 	new_img.fill(Color(0, 0, 0, 0))
-	new_img.blit_rect(old_img, Rect2i(Vector2i.ZERO, old_img.get_size()), Vector2i(int(pad.x), int(pad.y)))
+	new_img.blit_rect(old_img, Rect2i(Vector2i.ZERO, old_img.get_size()), Vector2i(pad.x, pad.y))
 	layer.image = new_img
-	layer.left -= int(pad.x)
-	layer.top -= int(pad.y)
-	layer.right += int(pad.z)
-	layer.bottom += int(pad.w)
+	layer.left -= pad.x
+	layer.top -= pad.y
+	layer.right += pad.z
+	layer.bottom += pad.w
 
 
 func _effect_padding(effects: Dictionary) -> Vector4i:
@@ -260,7 +260,7 @@ func _effect_padding(effects: Dictionary) -> Vector4i:
 		var angle := deg_to_rad(float(shadow.get("angle", 135.0)))
 		var distance := float(shadow.get("distance", 0.0))
 		var blur := max(0.0, float(shadow.get("size", 0.0)))
-		var offset := Vector2(cos(angle), -sin(angle)) * distance
+		var offset := Vector2(-cos(angle), sin(angle)) * distance
 		left = max(left, int(ceil(blur + max(0.0, -offset.x))))
 		top = max(top, int(ceil(blur + max(0.0, -offset.y))))
 		right = max(right, int(ceil(blur + max(0.0, offset.x))))
