@@ -24,9 +24,10 @@ func _initialize() -> void:
 func _dump_layers(layers: Array, indent: String) -> void:
 	for layer in layers:
 		var mask_text := _mask_text(layer.mask_info)
+		var effects_text := _effects_text(layer.effects)
 		if layer.has_text:
 			var td: Dictionary = layer.text_data
-			print("%sTEXT name=\"%s\" clip=%s text=\"%s\" size=%s raw_size=%s scale=%s color=%s bounds=(%d,%d,%d,%d)%s keys=%s" % [
+			print("%sTEXT name=\"%s\" clip=%s text=\"%s\" size=%s raw_size=%s scale=%s color=%s bounds=(%d,%d,%d,%d)%s%s keys=%s" % [
 				indent,
 				layer.name,
 				str(layer.is_clipping_mask),
@@ -40,19 +41,21 @@ func _dump_layers(layers: Array, indent: String) -> void:
 				layer.right,
 				layer.bottom,
 				mask_text,
+				effects_text,
 				str(layer.info_keys),
 			])
 		elif layer.is_group:
-			print("%sGROUP name=\"%s\" clip=%s children=%d%s keys=%s" % [
+			print("%sGROUP name=\"%s\" clip=%s children=%d%s%s keys=%s" % [
 				indent,
 				layer.name,
 				str(layer.is_clipping_mask),
 				layer.children.size(),
 				mask_text,
+				effects_text,
 				str(layer.info_keys),
 			])
 		elif layer.is_clipping_mask:
-			print("%sCLIP name=\"%s\" bounds=(%d,%d,%d,%d)%s keys=%s" % [
+			print("%sCLIP name=\"%s\" bounds=(%d,%d,%d,%d)%s%s keys=%s" % [
 				indent,
 				layer.name,
 				layer.left,
@@ -60,10 +63,11 @@ func _dump_layers(layers: Array, indent: String) -> void:
 				layer.right,
 				layer.bottom,
 				mask_text,
+				effects_text,
 				str(layer.info_keys),
 			])
 		else:
-			print("%sBITMAP name=\"%s\" clip=%s opacity=%.3f blend=%s bounds=(%d,%d,%d,%d)%s keys=%s" % [
+			print("%sBITMAP name=\"%s\" clip=%s opacity=%.3f blend=%s bounds=(%d,%d,%d,%d)%s%s keys=%s" % [
 				indent,
 				layer.name,
 				str(layer.is_clipping_mask),
@@ -74,6 +78,7 @@ func _dump_layers(layers: Array, indent: String) -> void:
 				layer.right,
 				layer.bottom,
 				mask_text,
+				effects_text,
 				str(layer.info_keys),
 			])
 
@@ -95,3 +100,9 @@ func _mask_text(mask_info: Dictionary) -> String:
 		str(mask_info.get("flags", "?")),
 		str(mask_info.get("disabled", "?")),
 	]
+
+
+func _effects_text(effects: Dictionary) -> String:
+	if effects.is_empty():
+		return ""
+	return " effects=%s" % str(effects.keys())

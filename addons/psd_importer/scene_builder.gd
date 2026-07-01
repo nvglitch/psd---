@@ -25,6 +25,7 @@ enum RootType {
 var root_type: RootType = RootType.CONTROL
 var canvas_size: Vector2 = Vector2.ZERO
 var apply_basic_blend_modes: bool = false
+const PS_LAYER_STYLE_SHADER := preload("res://addons/psd_importer/ps_layer_style.gdshader")
 
 
 func build(parser: PSDParser) -> Node:
@@ -163,6 +164,7 @@ func _build_texture_node(layer, parent_origin: Vector2) -> Node:
 	_apply_position(node, layer, parent_origin)
 	_apply_size(node, layer)
 	_apply_opacity(node, layer)
+	_apply_layer_style_material(node, layer)
 
 	var tex: Texture2D = null
 	if layer.image != null:
@@ -211,6 +213,7 @@ func _build_label(layer, parent_origin: Vector2) -> Node:
 	label.custom_minimum_size = label.size
 	_apply_text_transform(label, td)
 	_apply_opacity(label, layer)
+	_apply_layer_style_material(label, layer)
 
 	return label
 
@@ -231,6 +234,7 @@ func _build_solid_color(layer, parent_origin: Vector2) -> Node:
 
 	_apply_position(cr, layer, parent_origin)
 	_apply_opacity(cr, layer)
+	_apply_layer_style_material(cr, layer)
 
 	return cr
 
@@ -261,10 +265,55 @@ func _apply_opacity(node: Node, layer) -> void:
 		_apply_blend_mode(node, layer.blend_mode)
 
 
+func _apply_layer_style_material(node: Node, layer) -> void:
+	if not node is CanvasItem:
+		return
+	var effects: Dictionary = layer.effects
+	if effects.is_empty():
+		return
+
+	var mat := ShaderMaterial.new()
+	mat.shader = PS_LAYER_STYLE_SHADER
+
+	if effects.has("color_overlay"):
+		var effect: Dictionary = effects["color_overlay"]
+		mat.set_shader_parameter("use_color_overlay", true)
+		mat.set_shader_parameter("color_overlay_color", effect.get("color", Color.WHITE))
+		mat.set_shader_parameter("color_overlay_opacity", float(effect.get("opacity", 1.0)))
+
+	if effects.has("stroke"):
+		var effect: Dictionary = effects["stroke"]
+		mat.set_shader_parameter("use_stroke", true)
+		mat.set_shader_parameter("stroke_color", effect.get("color", Color.BLACK))
+		mat.set_shader_parameter("stroke_opacity", float(effect.get("opacity", 1.0)))
+		mat.set_shader_parameter("stroke_size", max(0.0, float(effect.get("size", 1.0))))
+
+	if effects.has("outer_glow"):
+		var effect: Dictionary = effects["outer_glow"]
+		mat.set_shader_parameter("use_outer_glow", true)
+		mat.set_shader_parameter("outer_glow_color", effect.get("color", Color.WHITE))
+		mat.set_shader_parameter("outer_glow_opacity", float(effect.get("opacity", 1.0)))
+		mat.set_shader_parameter("outer_glow_size", max(0.0, float(effect.get("size", 8.0))))
+
+	if effects.has("drop_shadow"):
+		var effect: Dictionary = effects["drop_shadow"]
+		var angle := deg_to_rad(float(effect.get("angle", 135.0)))
+		var distance := float(effect.get("distance", 4.0))
+		mat.set_shader_parameter("use_drop_shadow", true)
+		mat.set_shader_parameter("drop_shadow_color", effect.get("color", Color.BLACK))
+		mat.set_shader_parameter("drop_shadow_opacity", float(effect.get("opacity", 0.75)))
+		mat.set_shader_parameter("drop_shadow_size", max(0.0, float(effect.get("size", 8.0))))
+		mat.set_shader_parameter("drop_shadow_offset", Vector2(cos(angle), -sin(angle)) * distance)
+
+	node.material = mat
+
+
 func _apply_blend_mode(node: Node, psd_blend_mode: String) -> void:
 	if not apply_basic_blend_modes:
 		return
 	if not node is CanvasItem:
+		return
+	if node.material != null:
 		return
 
 	var mode := _canvas_blend_mode(psd_blend_mode)

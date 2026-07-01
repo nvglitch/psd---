@@ -33,6 +33,7 @@ class LayerData:
 	var image: Image                # RGBA8 image (null for groups / adjustment layers)
 	var texture_path: String = ""   # External PNG path written by the importer
 	var text_data: Dictionary       # {text: "", font: "", size: float, color: Color}
+	var effects: Dictionary = {}    # Photoshop layer styles parsed from lfx2/lrFX
 	var mask_info: Dictionary = {}  # debug: layer mask metadata, if present
 	var info_keys: Array[String] = []  # debug: additional info keys found
 
@@ -352,26 +353,7 @@ func _read_layer_channels(f: FileAccess, rec: Dictionary) -> void:
 			img.set_pixel(x, y, Color(r / 255.0, g / 255.0, b / 255.0, a / 255.0))
 
 	rec["image"] = img
-	_apply_layer_effects_to_image(img, rec.get("effects", {}))
 	rec.erase("_channels")  # clean up temp
-
-
-func _apply_layer_effects_to_image(img: Image, effects: Dictionary) -> void:
-	if img == null or effects.is_empty():
-		return
-	if not effects.has("color_overlay"):
-		return
-
-	var overlay: Dictionary = effects["color_overlay"]
-	var color: Color = overlay.get("color", Color.WHITE)
-	var opacity := clamp(float(overlay.get("opacity", 1.0)), 0.0, 1.0)
-	for y in img.get_height():
-		for x in img.get_width():
-			var px := img.get_pixel(x, y)
-			if px.a <= 0.0:
-				continue
-			var rgb := px.lerp(Color(color.r, color.g, color.b, px.a), opacity)
-			img.set_pixel(x, y, Color(rgb.r, rgb.g, rgb.b, px.a))
 
 
 # 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲
@@ -417,42 +399,99 @@ func _decompress_rle(f: FileAccess, row_lens: Array[int], row_width: int, channe
 
 func _parse_layer_effects(bytes: PackedByteArray) -> Dictionary:
 	var out := {}
-	var text := bytes.get_string_from_ascii()
-	var sofi_pos := text.find("SoFi")
-	if sofi_pos < 0:
-		sofi_pos = text.find("solidFillMulti")
-	if sofi_pos < 0:
-		return out
 
-	var next_effect_pos := _find_next_effect_marker(text, sofi_pos + 4)
-	var search_end := next_effect_pos if next_effect_pos > sofi_pos else bytes.size()
-	var section := text.substr(sofi_pos, search_end - sofi_pos)
-	if section.find("enabbool") >= 0 and not _read_bool_after_marker(bytes, sofi_pos, search_end, "enabbool"):
-		return out
-	if section.find("Nrml") < 0:
-		return out
+	var color_overlay := _parse_color_style(bytes, ["SoFi", "solidFillMulti"])
+	if not color_overlay.is_empty():
+		out["color_overlay"] = color_overlay
 
-	var rd_pos := text.find("Rd  doub", sofi_pos)
-	var grn_pos := text.find("Grn doub", sofi_pos)
-	var bl_pos := text.find("Bl  doub", sofi_pos)
+	var stroke := _parse_color_style(bytes, ["FrFX", "frameFXMulti"])
+	if not stroke.is_empty():
+		stroke["size"] = _read_unit_float_in_style(bytes, stroke["_start"], stroke["_end"], ["Sz  UntF", "sizeUntF"])
+		stroke.erase("_start")
+		stroke.erase("_end")
+		out["stroke"] = stroke
+
+	var outer_glow := _parse_color_style(bytes, ["OrGl", "outerGlowMulti"])
+	if not outer_glow.is_empty():
+		outer_glow["size"] = _read_unit_float_in_style(bytes, outer_glow["_start"], outer_glow["_end"], ["blurUntF", "CkmtUntF", "Sz  UntF"])
+		outer_glow.erase("_start")
+		outer_glow.erase("_end")
+		out["outer_glow"] = outer_glow
+
+	var drop_shadow := _parse_color_style(bytes, ["DrSh", "dropShadowMulti"])
+	if not drop_shadow.is_empty():
+		drop_shadow["size"] = _read_unit_float_in_style(bytes, drop_shadow["_start"], drop_shadow["_end"], ["blurUntF", "CkmtUntF", "Sz  UntF"])
+		drop_shadow["distance"] = _read_unit_float_in_style(bytes, drop_shadow["_start"], drop_shadow["_end"], ["DstnUntF", "laglUntF"])
+		drop_shadow["angle"] = _read_unit_float_in_style(bytes, drop_shadow["_start"], drop_shadow["_end"], ["laglUntF", "AnglUntF"])
+		drop_shadow.erase("_start")
+		drop_shadow.erase("_end")
+		out["drop_shadow"] = drop_shadow
+
+	for key in out.keys():
+		if out[key] is Dictionary:
+			out[key].erase("_start")
+			out[key].erase("_end")
+	return out
+
+
+func _parse_color_style(bytes: PackedByteArray, markers: Array[String]) -> Dictionary:
+	var start := _find_first_marker_bytes(bytes, markers, 0)
+	if start < 0:
+		return {}
+
+	var end := _find_next_effect_section_bytes(bytes, start + 4)
+	if end <= start:
+		end = bytes.size()
+
+	if _find_bytes(bytes, "enabbool".to_ascii_buffer(), start, end) >= 0 and not _read_bool_after_marker(bytes, start, end, "enabbool"):
+		return {}
+
+	var color := _read_color_in_style(bytes, start, end)
+	if color.a <= 0.0:
+		return {}
+
+	var opacity := _read_unit_float_in_style(bytes, start, end, ["OpctUntF"])
+	if opacity <= 0.0:
+		opacity = 100.0
+
+	return {
+		"color": color,
+		"opacity": clamp(opacity / 100.0, 0.0, 1.0),
+		"_start": start,
+		"_end": end,
+	}
+
+
+func _find_first_marker_bytes(bytes: PackedByteArray, markers: Array[String], from: int) -> int:
+	var best := -1
+	for marker in markers:
+		var pos := _find_bytes(bytes, marker.to_ascii_buffer(), from, bytes.size())
+		if pos >= 0 and (best < 0 or pos < best):
+			best = pos
+	return best
+
+
+func _read_color_in_style(bytes: PackedByteArray, start: int, end: int) -> Color:
+	var rd_pos := _find_bytes(bytes, "Rd  doub".to_ascii_buffer(), start, end)
+	var grn_pos := _find_bytes(bytes, "Grn doub".to_ascii_buffer(), start, end)
+	var bl_pos := _find_bytes(bytes, "Bl  doub".to_ascii_buffer(), start, end)
 	if rd_pos < 0 or grn_pos < 0 or bl_pos < 0:
-		return out
-	if rd_pos >= search_end or grn_pos >= search_end or bl_pos >= search_end:
-		return out
+		return Color(0, 0, 0, 0)
+	if rd_pos >= end or grn_pos >= end or bl_pos >= end:
+		return Color(0, 0, 0, 0)
 
 	var r := _read_be_double_at(bytes, rd_pos + 8) / 255.0
 	var g := _read_be_double_at(bytes, grn_pos + 8) / 255.0
 	var b := _read_be_double_at(bytes, bl_pos + 8) / 255.0
-	var opacity := 1.0
-	var opct_pos := text.find("OpctUntF", sofi_pos)
-	if opct_pos >= 0 and opct_pos < search_end:
-		opacity = _read_be_double_at(bytes, opct_pos + 12) / 100.0
+	return Color(clamp(r, 0.0, 1.0), clamp(g, 0.0, 1.0), clamp(b, 0.0, 1.0), 1.0)
 
-	out["color_overlay"] = {
-		"color": Color(clamp(r, 0.0, 1.0), clamp(g, 0.0, 1.0), clamp(b, 0.0, 1.0), 1.0),
-		"opacity": clamp(opacity, 0.0, 1.0),
-	}
-	return out
+
+func _read_unit_float_in_style(bytes: PackedByteArray, start: int, end: int, markers: Array[String]) -> float:
+	for marker in markers:
+		var pos := _find_bytes(bytes, marker.to_ascii_buffer(), start, end)
+		if pos >= 0 and pos + 20 <= end:
+			return _read_be_double_at(bytes, pos + 12)
+	return 0.0
 
 
 func _find_next_effect_marker(text: String, from: int) -> int:
@@ -465,12 +504,38 @@ func _find_next_effect_marker(text: String, from: int) -> int:
 	return best
 
 
+func _find_next_effect_section_bytes(bytes: PackedByteArray, from: int) -> int:
+	var markers := ["dropShadowMulti", "innerShadowMulti", "outerGlowMulti", "innerGlowMulti", "bevelEmbossMulti", "solidFillMulti", "gradientFillMulti", "patternFillMulti", "frameFXMulti"]
+	var best := -1
+	for marker in markers:
+		var pos := _find_bytes(bytes, marker.to_ascii_buffer(), from, bytes.size())
+		if pos >= 0 and (best < 0 or pos < best):
+			best = pos
+	return best
+
+
 func _read_bool_after_marker(bytes: PackedByteArray, start: int, end: int, marker: String) -> bool:
-	var text := bytes.get_string_from_ascii()
-	var pos := text.find(marker, start)
+	var pos := _find_bytes(bytes, marker.to_ascii_buffer(), start, end)
 	if pos < 0 or pos + marker.length() >= end:
 		return true
 	return bytes[pos + marker.length()] != 0
+
+
+func _find_bytes(bytes: PackedByteArray, needle: PackedByteArray, start: int, end: int) -> int:
+	if needle.is_empty():
+		return -1
+	var max_start: int = min(end, bytes.size()) - needle.size()
+	var i: int = max(0, start)
+	while i <= max_start:
+		var matched := true
+		for j in needle.size():
+			if bytes[i + j] != needle[j]:
+				matched = false
+				break
+		if matched:
+			return i
+		i += 1
+	return -1
 
 
 func _read_be_double_at(bytes: PackedByteArray, pos: int) -> float:
@@ -1031,6 +1096,7 @@ func _rec_to_layerdata(rec: Dictionary) -> LayerData:
 	ld.is_clipping_mask = rec.get("is_clipping_mask", false)
 	ld.image      = rec.get("image", null)
 	ld.text_data  = rec.get("text_data", {})
+	ld.effects    = rec.get("effects", {})
 	ld.mask_info  = rec.get("mask_info", {})
 	ld.info_keys  = rec.get("info_keys", [])
 

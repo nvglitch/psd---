@@ -196,6 +196,8 @@ func _write_layer_textures_recursive(layers: Array, texture_dir: String, used_na
 		if layer.image == null:
 			continue
 
+		_expand_layer_for_effects(layer)
+
 		counter[0] = int(counter[0]) + 1
 		var file_name := _unique_texture_name(layer.name, int(counter[0]), used_names)
 		var res_path := "%s/%s.png" % [texture_dir, file_name]
@@ -206,6 +208,65 @@ func _write_layer_textures_recursive(layers: Array, texture_dir: String, used_na
 		gen_files.append(res_path)
 
 	return OK
+
+
+func _expand_layer_for_effects(layer) -> void:
+	if layer.image == null:
+		return
+	var pad := _effect_padding(layer.effects)
+	if pad.x <= 0 and pad.y <= 0 and pad.z <= 0 and pad.w <= 0:
+		return
+
+	var old_img: Image = layer.image
+	var new_w := old_img.get_width() + int(pad.x) + int(pad.z)
+	var new_h := old_img.get_height() + int(pad.y) + int(pad.w)
+	if new_w <= old_img.get_width() or new_h <= old_img.get_height():
+		return
+
+	var new_img := Image.create(new_w, new_h, false, Image.FORMAT_RGBA8)
+	new_img.fill(Color(0, 0, 0, 0))
+	new_img.blit_rect(old_img, Rect2i(Vector2i.ZERO, old_img.get_size()), Vector2i(int(pad.x), int(pad.y)))
+	layer.image = new_img
+	layer.left -= int(pad.x)
+	layer.top -= int(pad.y)
+	layer.right += int(pad.z)
+	layer.bottom += int(pad.w)
+
+
+func _effect_padding(effects: Dictionary) -> Vector4i:
+	var left := 0
+	var top := 0
+	var right := 0
+	var bottom := 0
+
+	if effects.has("stroke"):
+		var stroke: Dictionary = effects["stroke"]
+		var amount := int(ceil(max(0.0, float(stroke.get("size", 0.0)))))
+		left = max(left, amount)
+		top = max(top, amount)
+		right = max(right, amount)
+		bottom = max(bottom, amount)
+
+	if effects.has("outer_glow"):
+		var glow: Dictionary = effects["outer_glow"]
+		var amount := int(ceil(max(0.0, float(glow.get("size", 0.0)))))
+		left = max(left, amount)
+		top = max(top, amount)
+		right = max(right, amount)
+		bottom = max(bottom, amount)
+
+	if effects.has("drop_shadow"):
+		var shadow: Dictionary = effects["drop_shadow"]
+		var angle := deg_to_rad(float(shadow.get("angle", 135.0)))
+		var distance := float(shadow.get("distance", 0.0))
+		var blur := max(0.0, float(shadow.get("size", 0.0)))
+		var offset := Vector2(cos(angle), -sin(angle)) * distance
+		left = max(left, int(ceil(blur + max(0.0, -offset.x))))
+		top = max(top, int(ceil(blur + max(0.0, -offset.y))))
+		right = max(right, int(ceil(blur + max(0.0, offset.x))))
+		bottom = max(bottom, int(ceil(blur + max(0.0, offset.y))))
+
+	return Vector4i(left, top, right, bottom)
 
 
 func _clear_generated_dir(abs_dir: String) -> void:
